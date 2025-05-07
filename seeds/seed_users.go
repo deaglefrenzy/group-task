@@ -4,10 +4,9 @@ import (
 	"context"
 	"fmt"
 	"learnfirestore/models"
+	"learnfirestore/repository"
 	"learnfirestore/utils"
 	"time"
-
-	"cloud.google.com/go/firestore"
 )
 
 func SeedUser() models.User {
@@ -18,19 +17,18 @@ func SeedUser() models.User {
 	}
 }
 
-func UserFactory(ctx context.Context, fs *firestore.Client, count int) ([]models.User, error) {
+func UserFactory(ctx context.Context, userRepo *repository.UserRepository, count int) ([]models.User, error) {
 
-	var user []models.User
+	var users []models.User
 	for range count {
 		u := SeedUser()
-		userColl := fs.Collection("users").NewDoc()
-		u.ID = userColl.ID
-		_, err := userColl.Set(ctx, u)
+		newUser, err := userRepo.CreateUser(ctx, u.Name, u.Email)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create user: %w", err)
+			return nil, err
 		}
-		user = append(user, u)
-		fmt.Printf("User %s (%s) created\n", u.Name, u.ID)
+		users = append(users, newUser)
+		fmt.Printf("User %s created\n", u.Name)
 	}
-	return user, nil
+
+	return users, nil
 }

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/firestore"
+	"github.com/google/uuid"
 )
 
 type GroupRepository struct {
@@ -51,14 +52,16 @@ func (r GroupRepository) CreateGroup(ctx context.Context, name string, descripti
 		ID:          groupRef.ID,
 		Name:        name,
 		Description: description,
+		Members:     map[string]models.Member{},
+		MembersID:   []string{member.ID},
+		Tasks:       []models.Tasks{},
+		Comments:    []models.Comments{},
 		CreatedAt:   time.Now(),
 	}
-	newMember := models.Member{
+	group.Members[member.ID] = models.Member{
 		ID:   member.ID,
 		Name: member.Name,
 	}
-
-	group.Members[member.ID] = newMember
 
 	if _, err := groupRef.Set(ctx, group); err != nil {
 		return models.Group{}, fmt.Errorf("failed to create Group: %w", err)
@@ -94,5 +97,159 @@ func (r GroupRepository) DeleteGroup(ctx context.Context, id string) error {
 	if err != nil {
 		return fmt.Errorf("failed to delete group: %w", err)
 	}
+	return nil
+}
+
+func (r GroupRepository) CreateTask(ctx context.Context, groupID string, title string, description string, priority bool, duedate time.Time, createdBy models.Member) (models.Tasks, error) {
+	task := models.Tasks{
+		UUID:        uuid.NewString(),
+		Title:       title,
+		Description: description,
+		Priority:    priority,
+		DueDate:     duedate,
+		CreatedBy:   createdBy,
+		CreatedAt:   time.Now(),
+	}
+
+	groupRef := r.coll.Doc(groupID)
+	_, err := groupRef.Update(ctx, []firestore.Update{
+		{Path: "tasks", Value: firestore.ArrayUnion(task)},
+	})
+
+	if err != nil {
+		return models.Tasks{}, fmt.Errorf("failed to create task: %w", err)
+	}
+	return task, nil
+}
+
+func (r GroupRepository) DeleteTask(ctx context.Context, groupID string, taskID string) error {
+	groupRef := r.coll.Doc(groupID)
+	doc, err := groupRef.Get(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to fetch group: %w", err)
+	}
+
+	var group models.Group
+	if err := doc.DataTo(&group); err != nil {
+		return fmt.Errorf("failed to decode group: %w", err)
+	}
+
+	found := false
+	for i, task := range group.Tasks {
+		if task.UUID == taskID {
+			now := time.Now()
+			group.Tasks[i].DeletedAt = &now
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		return fmt.Errorf("task not found")
+	}
+
+	_, err = groupRef.Update(ctx, []firestore.Update{
+		{Path: "tasks", Value: group.Tasks},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to delete task: %w", err)
+	}
+
+	return nil
+}
+
+func (r GroupRepository) CreateComment(ctx context.Context, groupID string, text string, createdBy models.Member) (models.Comments, error) {
+	comment := models.Comments{
+		UUID:      uuid.NewString(),
+		Text:      text,
+		CreatedBy: createdBy,
+		CreatedAt: time.Now(),
+	}
+
+	groupRef := r.coll.Doc(groupID)
+	_, err := groupRef.Update(ctx, []firestore.Update{
+		{Path: "comments", Value: firestore.ArrayUnion(comment)},
+	})
+
+	if err != nil {
+		return models.Comments{}, fmt.Errorf("failed to create commet: %w", err)
+	}
+	return comment, nil
+}
+
+func (r GroupRepository) DeleteComment(ctx context.Context, groupID string, commentID string) error {
+	groupRef := r.coll.Doc(groupID)
+	doc, err := groupRef.Get(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to fetch group: %w", err)
+	}
+
+	var group models.Group
+	if err := doc.DataTo(&group); err != nil {
+		return fmt.Errorf("failed to decode group: %w", err)
+	}
+
+	found := false
+	for i, comment := range group.Tasks {
+		if comment.UUID == commentID {
+			now := time.Now()
+			group.Comments[i].DeletedAt = &now
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		return fmt.Errorf("comment not found")
+	}
+
+	_, err = groupRef.Update(ctx, []firestore.Update{
+		{Path: "comment", Value: group.Comments},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to delete comment: %w", err)
+	}
+
+	return nil
+}
+
+func (r GroupRepository) AddMember(ctx context.Context, groupID string, newMember models.Member) (models.Member, error) {
+	groupRef := r.coll.Doc(groupID)
+	_, err := groupRef.Update(ctx, []firestore.Update{
+		{Path: "members", Value: firestore.ArrayUnion(newMember)},
+	})
+
+	if err != nil {
+		return models.Member{}, fmt.Errorf("failed to create task: %w", err)
+	}
+	return newMember, nil
+}
+
+func (r GroupRepository) RemoveMember(ctx context.Context, groupID string, member models.Member) error {
+	groupRef := r.coll.Doc(groupID)
+	doc, err := groupRef.Get(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to fetch group: %w", err)
+	}
+
+	var group models.Group
+	if err := doc.DataTo(&group); err != nil {
+		return fmt.Errorf("failed to decode group: %w", err)
+	}
+
+	value, exists := group.Members[member.ID]
+	if exists {
+		delete(group.Members, member.ID)
+	} else {
+		return fmt.Errorf("member '%s' not found", value.Name)
+	}
+
+	_, err = groupRef.Update(ctx, []firestore.Update{
+		{Path: "Members", Value: group.Members},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to remove member: %w", err)
+	}
+
 	return nil
 }

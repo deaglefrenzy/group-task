@@ -95,6 +95,7 @@ func (r NotificationRepository) DeleteNotification(ctx context.Context, id strin
 func (r NotificationRepository) WatchGroups(ctx context.Context) error {
 	coll := r.WithCollection("groups").coll
 	snap := coll.Snapshots(ctx)
+	groupCache := make(map[string]models.Group)
 
 	fmt.Println("Start watching Groups Collection...")
 
@@ -105,37 +106,58 @@ func (r NotificationRepository) WatchGroups(ctx context.Context) error {
 		}
 
 		for _, v := range qs.Changes {
-			groupID := v.Doc.Ref.ID
-
-			groupRef := r.WithCollection("groups").coll.Doc(groupID)
-			groupDoc, err := groupRef.Get(ctx)
-			if err != nil {
-				return fmt.Errorf("failed to get group: %w", err)
-			}
-
 			// REMEMBER: YOU MUST CONVERT THIS TO STRUCTURE DO NOT USE .DATA
-			var groupStruct models.Group
-			if err := groupDoc.DataTo(&groupStruct); err != nil {
+			var currentGroup models.Group
+			if err := v.Doc.DataTo(&currentGroup); err != nil {
 				panic(err)
 			}
+			currentGroup.ID = v.Doc.Ref.ID
 
 			reference := models.Reference{
 				Type: "group",
-				ID:   groupID,
+				ID:   currentGroup.ID,
 			}
 
 			if v.Kind == firestore.DocumentAdded {
-				for _, m := range groupStruct.Members {
-					r.CreateNotification(ctx, models.NotifiedUser(m), reference, "New group have been created with you in it.")
+				for _, m := range currentGroup.Members {
+					r.CreateNotification(ctx, models.NotifiedUser(m), reference, "You have been added to a new group.")
 				}
+				groupCache[currentGroup.ID] = currentGroup
 			} else if v.Kind == firestore.DocumentModified {
-				for _, m := range groupStruct.Members {
-					r.CreateNotification(ctx, models.NotifiedUser(m), reference, "There have been modifications in the group.")
+				previousGroup, exists := groupCache[currentGroup.ID]
+				if exists {
+					addedMembers := make(map[string]models.Member)
+					removedMembers := make(map[string]models.Member)
+
+					for id, member := range currentGroup.Members {
+						if _, exists := previousGroup.Members[id]; !exists {
+							addedMembers[id] = member
+						}
+					}
+
+					for id, member := range previousGroup.Members {
+						if _, exists := currentGroup.Members[id]; !exists {
+							removedMembers[id] = member
+						}
+					}
+					for _, member := range addedMembers {
+						for _, m := range currentGroup.Members {
+							r.CreateNotification(ctx, models.NotifiedUser(m), reference, "Member "+member.Name+" have joined group "+currentGroup.Name+".")
+						}
+					}
+
+					for _, member := range removedMembers {
+						for _, m := range previousGroup.Members {
+							r.CreateNotification(ctx, models.NotifiedUser(m), reference, "Member "+member.Name+" have been removed from group "+previousGroup.Name+".")
+						}
+					}
 				}
+				groupCache[currentGroup.ID] = currentGroup
 			} else if v.Kind == firestore.DocumentRemoved {
-				for _, m := range groupStruct.Members {
+				for _, m := range currentGroup.Members {
 					r.CreateNotification(ctx, models.NotifiedUser(m), reference, "Group have been deleted.")
 				}
+				delete(groupCache, currentGroup.ID)
 			}
 		}
 	}

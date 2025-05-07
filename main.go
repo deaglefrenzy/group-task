@@ -2,8 +2,9 @@ package main
 
 import (
 	connectFirestore "learnfirestore/firestore"
+	"learnfirestore/models"
 	"learnfirestore/repository"
-	"log"
+	"learnfirestore/seeds"
 )
 
 func main() {
@@ -13,25 +14,38 @@ func main() {
 		panic(err)
 	}
 
-	notif_repo := repository.NewNotificationRepository(fs)
+	//notif_repo := repository.NewNotificationRepository(fs)
 	//user_repo := repository.NewUserRepository(fs)
-	//group_repo := repository.NewGroupRepository(fs)
+	group_repo := repository.NewGroupRepository(fs)
 
-	//notif_repo.GetDocumentWithID(ctx, "3NdE2nmCcgO0cHIBOMdH")
+	// var newUser []models.User
+	// newUser, err = seeds.UserFactory(ctx, user_repo, 1)
+	// if err != nil {
+	// 	panic(err)
+	// }
 
-	go func() {
-		if err := notif_repo.WatchGroups(ctx); err != nil {
-			log.Printf("Watch error: %v", err)
-		}
-	}()
+	member := models.Member{ID: "yVVnNxl9GBF0ag2dWmd8", Name: "thick fast"}
 
-	select {}
+	newGroup, err := seeds.GroupFactory(ctx, group_repo, member, 1)
+	if err != nil {
+		panic(err)
+	}
+
+	err = seeds.CommentsFactory(ctx, group_repo, member, newGroup[0], 1)
+	if err != nil {
+		panic(err)
+	}
+
+	err = seeds.TaskFactory(ctx, group_repo, member, newGroup[0], 1)
+	if err != nil {
+		panic(err)
+	}
+
+	// if err := notif_repo.WatchGroups(ctx); err != nil {
+	// 	log.Printf("Watch error: %v", err)
+	// }
+
 }
-
-// newUser, err := users.UserFactory(ctx, fs, 1)
-// if err != nil {
-// 	panic(err)
-// }
 
 // member := models.User{ID: newUser[0].ID, Name: newUser[0].Name}
 
