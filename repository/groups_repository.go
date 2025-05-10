@@ -46,6 +46,60 @@ func (r GroupRepository) GetGroupWithID(ctx context.Context, id string) (models.
 	return group, nil
 }
 
+// IF REQUIRED CAN CHANGE CHANNEL TYPE
+// type GroupChanges struct {
+// 	Before models.Group
+// 	After  models.Group
+// }
+
+func (r GroupRepository) WatchGroups(ctx context.Context,
+	documentAdded chan models.Group,
+	documentModified chan models.GroupChanges,
+	documentRemoved chan models.Group,
+) error {
+	snap := r.coll.Snapshots(ctx)
+	tempGroup := make(map[string]models.Group)
+
+	fmt.Println("Start watching Groups Collection...")
+
+	for {
+		qs, err := snap.Next()
+		if err != nil {
+			panic(err)
+		}
+
+		for _, v := range qs.Changes {
+			// REMEMBER: YOU MUST CONVERT THIS TO STRUCTURE DO NOT USE .DATA
+			var currentGroup models.Group
+			if err := v.Doc.DataTo(&currentGroup); err != nil {
+				panic(err)
+			}
+			currentGroup.ID = v.Doc.Ref.ID
+
+			switch v.Kind {
+			case firestore.DocumentAdded:
+				documentAdded <- currentGroup
+				tempGroup[currentGroup.ID] = currentGroup
+			case firestore.DocumentModified:
+				previousGroup, exists := tempGroup[currentGroup.ID]
+				if !exists {
+					continue
+				} else {
+					GroupChanges := models.GroupChanges{
+						Before: previousGroup,
+						After:  currentGroup,
+					}
+					documentModified <- GroupChanges
+				}
+				tempGroup[currentGroup.ID] = currentGroup
+			case firestore.DocumentRemoved:
+				documentRemoved <- currentGroup
+				delete(tempGroup, currentGroup.ID)
+			}
+		}
+	}
+}
+
 func (r GroupRepository) CreateGroup(ctx context.Context, name string, description string, member models.Member) (models.Group, error) {
 	groupRef := r.coll.NewDoc()
 	group := models.Group{

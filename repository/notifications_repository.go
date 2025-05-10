@@ -45,13 +45,13 @@ func (r NotificationRepository) GetNotificationWithID(ctx context.Context, id st
 	return notification, nil
 }
 
-func (r NotificationRepository) CreateNotification(ctx context.Context, user models.NotifiedUser, reference models.Reference, message string) (models.Notification, error) {
+func (r NotificationRepository) CreateNotification(ctx context.Context, user models.NotifiedUser, groupID string, message string) (models.Notification, error) {
 	notifRef := r.coll.NewDoc()
 	notification := models.Notification{
 		ID:        notifRef.ID,
 		User:      user,
 		Message:   message,
-		Reference: reference,
+		GroupID:   groupID,
 		Read:      false,
 		CreatedAt: time.Now(),
 	}
@@ -95,7 +95,7 @@ func (r NotificationRepository) DeleteNotification(ctx context.Context, id strin
 func (r NotificationRepository) WatchGroups(ctx context.Context) error {
 	coll := r.WithCollection("groups").coll
 	snap := coll.Snapshots(ctx)
-	groupCache := make(map[string]models.Group)
+	tempGroup := make(map[string]models.Group)
 
 	fmt.Println("Start watching Groups Collection...")
 
@@ -113,51 +113,49 @@ func (r NotificationRepository) WatchGroups(ctx context.Context) error {
 			}
 			currentGroup.ID = v.Doc.Ref.ID
 
-			reference := models.Reference{
-				Type: "group",
-				ID:   currentGroup.ID,
-			}
-
 			if v.Kind == firestore.DocumentAdded {
 				for _, m := range currentGroup.Members {
-					r.CreateNotification(ctx, models.NotifiedUser(m), reference, "You have been added to a new group.")
+					r.CreateNotification(ctx, models.NotifiedUser(m), currentGroup.ID, "You have been added to a new group.")
 				}
-				groupCache[currentGroup.ID] = currentGroup
+				tempGroup[currentGroup.ID] = currentGroup
 			} else if v.Kind == firestore.DocumentModified {
-				previousGroup, exists := groupCache[currentGroup.ID]
-				if exists {
-					addedMembers := make(map[string]models.Member)
-					removedMembers := make(map[string]models.Member)
+				previousGroup, exists := tempGroup[currentGroup.ID]
+				if !exists {
+					fmt.Println("It doesn't exist, how can I check?")
+					continue
+				}
+				addedMembers := make(map[string]models.Member)
+				removedMembers := make(map[string]models.Member)
 
-					for id, member := range currentGroup.Members {
-						if _, exists := previousGroup.Members[id]; !exists {
-							addedMembers[id] = member
-						}
-					}
-
-					for id, member := range previousGroup.Members {
-						if _, exists := currentGroup.Members[id]; !exists {
-							removedMembers[id] = member
-						}
-					}
-					for _, member := range addedMembers {
-						for _, m := range currentGroup.Members {
-							r.CreateNotification(ctx, models.NotifiedUser(m), reference, "Member "+member.Name+" have joined group "+currentGroup.Name+".")
-						}
-					}
-
-					for _, member := range removedMembers {
-						for _, m := range previousGroup.Members {
-							r.CreateNotification(ctx, models.NotifiedUser(m), reference, "Member "+member.Name+" have been removed from group "+previousGroup.Name+".")
-						}
+				for id, member := range currentGroup.Members {
+					if _, exists := previousGroup.Members[id]; !exists {
+						addedMembers[id] = member
 					}
 				}
-				groupCache[currentGroup.ID] = currentGroup
+
+				for id, member := range previousGroup.Members {
+					if _, exists := currentGroup.Members[id]; !exists {
+						removedMembers[id] = member
+					}
+				}
+				for _, member := range addedMembers {
+					for _, m := range currentGroup.Members {
+						r.CreateNotification(ctx, models.NotifiedUser(m), currentGroup.ID, "Member "+member.Name+" have joined group "+currentGroup.Name+".")
+					}
+				}
+
+				for _, member := range removedMembers {
+					for _, m := range previousGroup.Members {
+						r.CreateNotification(ctx, models.NotifiedUser(m), currentGroup.ID, "Member "+member.Name+" have been removed from group "+previousGroup.Name+".")
+					}
+				}
+
+				tempGroup[currentGroup.ID] = currentGroup
 			} else if v.Kind == firestore.DocumentRemoved {
 				for _, m := range currentGroup.Members {
-					r.CreateNotification(ctx, models.NotifiedUser(m), reference, "Group have been deleted.")
+					r.CreateNotification(ctx, models.NotifiedUser(m), currentGroup.ID, "Group have been deleted.")
 				}
-				delete(groupCache, currentGroup.ID)
+				delete(tempGroup, currentGroup.ID)
 			}
 		}
 	}
